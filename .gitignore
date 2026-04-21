@@ -27,6 +27,8 @@ coverage/
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 
 # Secrets (CRITICAL: never commit .p12 or ATV credentials)
 *.p12
@@ -66,3 +68,9 @@ proto/gen/
 storybook-static/
 .docusaurus/
 docs/_build/
+
+# Turbo cache
+.turbo/
+
+# Git worktrees (make-no-mistakes workflow)
+.worktrees/
