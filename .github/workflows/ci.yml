@@ -1,0 +1,76 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22.11.0, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22.11.0, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # proto:gen runs here once Task 32 lands and `proto/` exists.
+      - name: Generate proto (skipped until Task 32)
+        run: |
+          if [ -d proto ]; then pnpm proto:gen; else echo "no proto dir yet — skipping"; fi
+      - run: pnpm typecheck
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22.11.0, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Generate proto (skipped until Task 32)
+        run: |
+          if [ -d proto ]; then pnpm proto:gen; else echo "no proto dir yet — skipping"; fi
+      - run: pnpm test -- --coverage --passWithNoTests
+  proto-lint:
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('proto/**') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: bufbuild/buf-setup-action@v1
+      - run: buf lint proto
+      - run: buf breaking proto --against '.git#branch=main,subdir=proto'
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22.11.0, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Generate proto (skipped until Task 32)
+        run: |
+          if [ -d proto ]; then pnpm proto:gen; else echo "no proto dir yet — skipping"; fi
+      - name: Build (skipped until first package lands in Task 6)
+        run: |
+          if [ -d packages ] && find packages -maxdepth 2 -name 'package.json' | grep -q .; then
+            pnpm build
+          else
+            echo "no buildable packages yet — skipping"
+          fi
