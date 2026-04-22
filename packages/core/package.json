@@ -1,0 +1,26 @@
+{
+  "name": "@lapc506/invoice-core-core",
+  "version": "0.1.0-dev",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" },
+    "./domain": { "import": "./dist/domain/index.js", "types": "./dist/domain/index.d.ts" },
+    "./app": { "import": "./dist/app/index.js", "types": "./dist/app/index.d.ts" }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "tsup": "8.3.5",
+    "typescript": "5.6.3",
+    "vitest": "2.1.4"
+  }
+}
