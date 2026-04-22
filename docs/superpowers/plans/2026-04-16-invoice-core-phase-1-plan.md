@@ -4408,3 +4408,94 @@ Full script lives at `scripts/create-github-labels.sh` (Task 5). Label matrix:
 | `priority/` | `priority/p0`, `priority/p1`, `priority/p2` |
 
 Script uses `gh label create ... --force` (idempotent) so it is safe to re-run.
+
+---
+
+## Appendix C — Post-execution findings (Tasks 1–10)
+
+Tasks 1–10 executed and merged 2026-04-21 via `/make-no-mistakes:implement` (PRs #65–#74). Seven deviations from the plan surfaced during execution. This appendix records them so future executors (Tasks 11–60) start with accurate expectations. Each finding identifies the affected task, the root cause, the resolution that shipped, and the implication for later tasks.
+
+### C.1 · `@types/node` missing from devDependencies (affects Tasks 1 & 6)
+
+**Symptom:** `tsconfig.base.json` declares `"types": ["node"]`, but no plan step adds `@types/node` to dependencies. TypeScript build fails on any source file importing `node:*` modules.
+
+**Resolution shipped:**
+- PR #65 (Task 1): added `@types/node@^22` to root `package.json` devDependencies.
+- PR #70 (Task 6): added `@types/node@^22` to `packages/core/package.json` devDependencies.
+
+**Implication for Tasks 11+:** every new package created under `packages/*` must include `@types/node` in its local `devDependencies`. Update the plan's per-task package-creation snippets accordingly; do not rely on hoisting via the root.
+
+### C.2 · CI workflow rejected by GitHub Actions validator (affects Task 4)
+
+**Symptom:** The plan's original `.github/workflows/ci.yml` used inline bash guards (`if [ -d proto ]; then ...`) for `proto-lint` and `build` jobs. The workflow parsed locally but GitHub's Actions validator refused to dispatch any jobs — the entire run never started, with no visible error on the PR.
+
+**Resolution shipped (PR #68):** CI reduced to three jobs — `lint`, `typecheck`, `test` — each running unconditionally. `proto-lint` and `build` were dropped from Fase 1 CI.
+
+**Implication for Tasks 11+:**
+- `proto-lint` job lands with Task 32 (proto codegen pipeline), once `buf.yaml` + `.proto` files exist.
+- `build` job lands with Task 48 (entrypoints + workers), once there is actual compiled output to validate.
+- Avoid inline `if [ -d ... ]` guards in workflow files — GitHub's validator rejects them when the referenced path does not exist at the commit being validated. Use `paths:` triggers or separate workflows for conditional jobs.
+
+### C.3 · Coverage thresholds fail against empty directories (affects Task 3)
+
+**Symptom:** As soon as `src/app/index.ts` exists as `export {};`, the Vitest threshold glob `packages/core/src/app/**` matches and reports 0% coverage, failing CI before a single test for that layer is written.
+
+**Resolution shipped (refined via PR #71 during Task 7 setup):** `vitest.config.ts` now excludes `**/index.ts` and `**/*.config.ts` from coverage collection:
+
+```ts
+coverage: {
+  exclude: ["**/index.ts", "**/*.config.ts", "**/*.spec.ts", "**/node_modules/**"],
+}
+```
+
+**Implication for Tasks 11+:** update plan Task 3 snippet upfront to include these excludes. Any task that introduces a new "barrel-only" `index.ts` (e.g., Task 21 — domain events + errors barrel) is already covered by the existing exclude; no per-task change needed.
+
+### C.4 · `pnpm test --coverage` fails with "No test files found" (affects Task 4)
+
+**Symptom:** The plan's original CI step ran `pnpm test -- --coverage`. Between Task 4 landing and Task 7 landing (when the first test file exists), Vitest exits non-zero with "No test files found", failing CI.
+
+**Resolution shipped (PR #68):** CI step uses `pnpm test --run --passWithNoTests` until tests exist. Task 7 (PR #71) silently drops `--passWithNoTests` once the first spec lands.
+
+**Implication for Tasks 11+:** no change needed — `--passWithNoTests` is already gone from CI. Flag documented here for reproducibility if the foundation is ever rebuilt.
+
+### C.5 · Biome formatter is stricter than the plan's inline code samples (cross-cutting)
+
+**Symptom:** Inline TypeScript samples in Tasks 10, 26, 33, 36–41 use multi-line discriminated union types and method-chained zod schemas that trip Biome's formatter. PRs initially fail `pnpm lint` until `pnpm lint:fix` is run.
+
+**Resolution shipped:** every task executor ran `pnpm lint:fix` before committing (adds ~10 s per task). No behavioral change.
+
+**Implication for Tasks 11+:** the executor workflow for every remaining task must include `pnpm lint:fix` before `git commit`. Consider adding a Husky pre-commit hook in a later task to automate this (candidate: extend Task 2 retroactively, or drop into Task 58 CONTRIBUTING as a developer-experience note).
+
+### C.6 · UUID VO accepts any UUID version, not only v4 (affects Tasks 7 & 11)
+
+**Symptom:** `UUID` VO in Task 7 uses `z.string().uuid()`, which accepts v1–v8 UUIDs. The test fixture happens to be v4 and passes, but a v1 UUID (which encodes the generator's MAC address — a PII leak vector) would also be accepted.
+
+**Resolution shipped (PR #71):** none for Task 7 — merged as `z.string().uuid()`. Future tightening deferred.
+
+**Implication for Tasks 11+:** when **Task 11 (CABYS + GTIN + ClaveNumérica)** lands, tighten the `UUID` VO schema to require v4 specifically (`/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`). Clave Numérica's 50-digit structure embeds a UUID-like segment and explicitly requires v4 per the SDK spec; that's the natural moment to lock the root VO.
+
+### C.7 · Greptile IS installed on the repo (operational, no plan change)
+
+**Symptom:** Pre-flight incorrectly reported that Greptile was not installed because it probed `gh pr view --json comments,reviews` on an already-merged PR (#2) with no bot activity logged. Greptile only posts review comments on open PRs and leaves a `check_suite` record behind after merge.
+
+**Resolution shipped:** executor observed a queued `Greptile` check on every PR during Task 1–10 execution. No action taken because Greptile was not actively commenting.
+
+**Implication for Tasks 11+:**
+- Use `gh api repos/lapc506/invoice-core/check-suites --jq '.check_suites[].app.name' | sort -u` during pre-flight to verify installed review apps.
+- If Greptile starts commenting, tag `@greptile review` per the canonical `/make-no-mistakes:implement` protocol and resolve findings before merge.
+- CodeRabbit and Graphite were NOT observed in any check suite — treat as not installed until verified otherwise.
+
+---
+
+## Appendix D — Future executor checklist (Tasks 11–60)
+
+Distilled from Appendix C. Before dispatching the next execution batch:
+
+- [ ] Confirm `@types/node@^22` is in both root and per-package `devDependencies` before any new package is scaffolded.
+- [ ] Before adding CI jobs, test the `.yml` against GitHub's dispatch validator — push to a throwaway branch and check `gh run list` actually fires jobs, not just that it parses locally.
+- [ ] Update Task 32 scope to include the `proto-lint` CI job (previously planned for Task 4).
+- [ ] Update Task 48 scope to include the `build` CI job (previously planned for Task 4).
+- [ ] Every task that introduces new files under `packages/*/src/**` runs `pnpm lint:fix` before `git commit`.
+- [ ] Task 11 tightens the `UUID` VO to require v4 (see C.6).
+- [ ] Verify installed review apps via `gh api ... /check-suites` during pre-flight, not via PR-comment scraping.
+
